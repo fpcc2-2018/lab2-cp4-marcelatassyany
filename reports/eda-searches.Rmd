@@ -3,24 +3,282 @@ title: "EDA buscas"
 output: html_notebook
 ---
 
-O objeto principal da análise são as buscas e a navegação depois da busca. Criamos esses dados a partir dos dados originais da wikimedia em `/data/search_data.csv`. 
-
-Aqui, exploramos esses dados. 
 
 ```{r setup}
 library(tidyverse)
 library(here)
 library(lubridate)
 theme_set(theme_bw())
+library(moments)
+library(GGally)
+library(ggfortify)
+options(scipen=999)
 ```
 
 ```{r ETL}
-buscas = read_csv(here::here("data/search_data.csv"))
+buscas = read_csv(here::here("data/search_data.csv")) %>%
+    mutate(day=round_date(session_start_date, unit = "day"))
+
+
 ```
+
+
+Este relatório tem como objetivo expor uma análise exploratória dos dados fornecidos pela Wikimedia Foundation que vem de um esquema de rastreamento usados para avaliar a satisfação do usuário. A análise realizada se dará com o intuito de responder quatro questionamentos pré-estabelecidos e que são exibidos nas próximas seções.
+
+
+###**1. Qual é a nossa taxa de cliques geral diária? Como isso varia entre os grupos?**
+
+Para responder essa pergunta faremos uso da variável **num_clicks_prop** que retorna  a proporção de sessões de pesquisa em que o usuário clicou em um dos resultados exibidos e da variável **group** que divide o conjunto de dados em dois grupos: A e B (não se tem mais informações sobre do que se trata cada um desses grupos). Primeiramente, é necessário avaliar a distribuição de cada uma dessas variaveis.
+
+Analisando a variável group, nota-se que o grupo B é maior que o grupo A (uma diferença de 9111). As características desses grupos poderiam explicar o motivo dessa diferença, no entanto, não se tem acesso a essa informação.
+
+
+```{r}
+buscas %>%
+    distinct(session_id, .keep_all=TRUE) %>%
+ggplot() + 
+  geom_bar(mapping = aes(x = group), stat = "count")  + labs(y="Número de Grupos", x="")
+
+buscas %>%
+    distinct(session_id, .keep_all=TRUE) %>%
+    summarise(TamanhoA = length(which(group=="a")),
+TamanhoB = length(which(group=="b")))
+
+```
+
+
+
+
+Quanto a variável **num_clicks_prop**, observando o histograma não fica tão evidente as informações quanto a assimetria dos dados. Contudo, é possível observar que a maioria dos dados estão concentrados a direita indicando que os dados possuem uma assimetria negativa (negative skew), o que é confirmado pelo fato da mediana ser maior que a média e o coeficiente de assimetria ser negativo. Esse comportamento indica a presença de valores discrepantes, o que é confirmado pelo alto desvio padrão apresentado.
+
+
+
+```{r}
+
+
+buscas2 = buscas %>%
+     distinct(session_id, .keep_all=TRUE) %>%
+    count(day, group)
+
+buscas3 = buscas %>%
+    filter(num_clicks >= 1) %>%
+    distinct(session_id, .keep_all=TRUE) %>%
+    count(day, group)
+
+clickthrough_rate <- data.frame(buscas2$day,buscas2$group, buscas2$n, buscas3$n)
+colnames(clickthrough_rate) = c("day", "group", "session_total", "visitpage")
+
+
+clickthrough_rate = clickthrough_rate%>%
+    mutate(num_clicks_prop=visitpage/session_total)
+
+clickthrough_rate %>% 
+    ggplot(aes(x = num_clicks_prop)) + 
+    geom_histogram(bins = 20, fill = "white", color = "blue")  + geom_rug(alpha = .3) + labs(y="Frequência", x="Taxa de Cliques")
+
+clickthrough_rate %>% 
+ summarise(Assimetria =  skewness(num_clicks_prop),
+            Media = mean(num_clicks_prop),
+           Mediana = median(num_clicks_prop),
+           Desvio = sd(num_clicks_prop),
+            Minimo = min(num_clicks_prop),
+            Maximo = max(num_clicks_prop))
+
+```
+
+Observando a mediana exibida no boxplot nota-se uma pequena diferença na taxa de cliques em função dos dias. No entanto, devido a variabilidade dos dados não é possível afirmar que há uma alteração na taxa de cliques no decorrer dos dias, pelo contrário, há maiores evidências de que a taxa tende a se manter.
+
+
+
+```{r}
+
+
+clickthrough_rate  %>% mutate(day = day(day)) %>%
+    mutate(day = factor(day, levels = c("1","2","3","4","5","6","7","8","9"))) %>%
+    
+    ggplot(clickthrough_rate, mapping = aes(x = day, y = num_clicks_prop))   + geom_boxplot() + labs(y="Taxa de Cliques", x="Dias")
+
+```
+
+Analisando esse comportamento entre os grupos, é possível notar, também, que há pouca variação na taxa de cliques tanto para o grupo A como para o grupo B. Também nota-se que a taxa de cliques é maior para o grupo A (0,66) do que para o grupo B (0,18).
+
+Não se tem conhecimento da diferença entre esses grupos, mas uma possível característica do grupo A pode ter relação com esse comportamento. De toda forma, seria necessário dispor de mais informações para se obter conclusões mais assertivas.
+
+```{r}
+clickthrough_rate  %>% mutate(day = day(day)) %>%
+    mutate(day = factor(day, levels = c("1","2","3","4","5","6","7","8","9"))) %>%
+    ggplot(clickthrough_rate, mapping = aes(x = day, y = num_clicks_prop))   + geom_boxplot() + facet_grid(group ~ .) + labs(y="Taxa de Cliques", x="Dias")
+
+
+
+    ggplot(clickthrough_rate, mapping = aes(x = group, y = num_clicks_prop))   +
+  geom_boxplot() + labs(y="Taxa de Cliques", x="Grupos")
+    
+    
+    clickthrough_rate %>% 
+        group_by(group) %>%
+ summarise( Media = mean(num_clicks_prop),
+           Mediana = median(num_clicks_prop),
+           Desvio = sd(num_clicks_prop),
+            Minimo = min(num_clicks_prop),
+            Maximo = max(num_clicks_prop))
+
+```
+
+
+
+###**2. Quais resultados as pessoas tendem a tentar primeiro? Como isso muda no dia-a-dia?**
+
+Para responder essa pergunta é necessário primeiramente analisar a distribuição da variável **first_click** que retorna qual a posição dos resultados que os usuários tentaram primeiro.
+
+Percebe-se que os resultados estão bem concentrados à esquerda, no entanto, existem valores discrepantes. Observa-se que a mediana é um valor que melhor representa todo o conjunto. O alto desvio padrão indica também a variabilidade dos dados.
+
+Por meio do próprio histograma e do valor da mediana, é possível constatar um comportamento esperado. Os usuários tendem a acessar o primeiro resultado da busca na maioria dos casos. Todavia, não se deve ignorar os valores extremos. Como, por exemplo, existe um caso em que o resultado da 4103º posição foi acessado primeiro. Este é um caso atípico, no entanto, surge a necessidade de maiores investigações para explicar esta ocorrência. Para este caso, pode ter sido usado algum sistema fazendo uso de técnicas de recuperação de informação (deep learning e machine learning), no entanto, são apenas suposições, não há informações suficientes para descrever esse ponto.
 
 ```{r}
 buscas %>% 
-    ggplot(aes(x = results)) + 
-    geom_histogram(binwidth = 5) 
+    ggplot(aes(x = first_click)) + 
+    geom_histogram(bins = 20, fill = "white", color = "blue")  + geom_rug(alpha = .3) + labs(y="Frequência", x="Primeiro Clique")
+
+buscas %>% 
+ summarise(Media = mean(first_click, na.rm=TRUE),
+           Mediana = median(first_click, na.rm=TRUE),
+ Desvio = sd(first_click, na.rm=TRUE),
+ Minimo = min(first_click,na.rm=TRUE),
+Maximo = max(first_click,na.rm=TRUE))
+
 ```
+
+Os resultados evidenciam também que esse comportamento não varia muito diariamente. Nota-se que o dia com maior número de outliers, foi o dia em que se observou o maior valor mencionado anteriormente. Observa-se então que este dia foi atípico, e pode sim ter sido influênciado por algum "usuário não-humano".
+
+```{r}
+
+buscas %>% 
+    mutate(day = day(day)) %>%
+    ggplot(buscas, mapping = aes(x = reorder(day,first_click), y = first_click))   +
+  geom_boxplot() + labs(y="Primeiro Clique", x="Dias")
+```
+
+###**3. Qual é a nossa taxa de resultados zero no geral? Como isso varia entre os grupos?**
+
+
+Para responder esta pergunta é importante analisar a distribuição da variável **results_zero_prop** que trata-se da proporção de pesquisas que retornou 0 resultados. Observando o histograma não é possível visualizar claramente os dados em termos de viés. 
+
+Nota-se uma discreta conscentração dos dados à esqueda, indicando uma assimetria positiva. Que é confirmado pelo fato da média ser maior que a mediana. No entanto, essa assimetria é muito suave, prova disso é que esses valores de tendência central são muito próximos e o desvio padrão é pequeno.
+
+```{r}
+
+buscas4 = buscas %>%
+    count(day, group)
+
+buscas5 = buscas %>%
+    filter(results == 0) %>%
+    count(day, group)
+
+zero_results_rate <- data.frame(buscas4$day,buscas4$group, buscas4$n, buscas5$n)
+colnames(zero_results_rate) = c("day", "group", "session_total", "results_zero")
+
+
+zero_results_rate = zero_results_rate%>%
+    mutate(results_zero_prop=results_zero/session_total)
+
+zero_results_rate %>%
+    ggplot(aes(x = results_zero_prop)) + 
+    geom_histogram(bins = 10, fill = "white", color = "blue")  + geom_rug(alpha = .3) + labs(y="Frequência", x="Proporção de Resultados Zero")
+
+zero_results_rate %>% 
+ summarise(Assimetria =  skewness(results_zero_prop),
+           Media = mean(results_zero_prop),
+           Mediana = median(results_zero_prop),
+           Desvio = sd(results_zero_prop),
+            Minimo = min(results_zero_prop),
+            Maximo = max(results_zero_prop))
+
+```
+
+Analisando o boxplot nota-se que a taxa de resultados zero foi baixa, a máxima taxa apresentada foi 0.20, e a mediana aproximadamente 0.18. Isso significa que a maioria das buscas retornam valores diferentes de zero, o que é um aspecto positivo. 
+
+Avaliando em função dos grupos, olhando para as medianas exibidas no boxplot, nota-se que as proporções para o grupo B foram superiores as proporções de resultados zero no grupo A. Todavia, devido a variabilidade dos dados não é possóvel afirmar que haja essa diferença. 
+
+De toda forma, para uma análise mais completa seria necessário entender a diferença e características desses grupos, para se buscar e investigar as possíveis causas desse comportamento.
+
+
+```{r}
+
+zero_results_rate %>% 
+    ggplot(zero_results_rate, mapping = aes(x = "", y = results_zero_prop))  + geom_boxplot() + labs(y="Proporção de Resultados Zero", x="")
+
+zero_results_rate %>% 
+    ggplot(zero_results_rate, mapping = aes(x = group, y = results_zero_prop))  + geom_boxplot() + labs(y="Proporção de Resultados Zero", x="Grupos")
+
+```
+
+
+
+
+###**4. A duração da sessão é aproximadamente o tempo entre o primeiro e o último evento de uma sessão. Escolha uma variável do conjunto de dados e descreva sua relação com o tamanho da sessão. Visualize o relacionamento.**
+
+Nessa seção será avaliado se há alguma relação entre  a duração da sessão (variável **duration**) e o número de cliques nos links dos resultados (variável **num_clicks**). Bem como da duração da sessão com o número de ocorrências retornadas ao usuário (variável **results**)
+
+Abaixo é possível observar os gráficos de dispersão, o coeficiente de correlação e a distribuição dos dados das variáveis consideradas. Foi observada uma maior relação entre a duração da sessão e o número de clicks, o que faz sentido uma vez que quanto mais cliques, espera-se que a duração da sessão aumente (forte correlação possitiva).
+
+
+```{r}
+buscas = buscas %>%
+    mutate(duration = as.numeric(difftime(session_last_date, session_start_date, units = "mins"))) 
+   
+   buscas%>% 
+  select(DURATION=duration, CLICKS=num_clicks) %>% 
+  ggpairs(mapping=ggplot2::aes(colour = "blue"),  upper = list(continuous = wrap('cor', method = "spearman")), lower = list(continuous = wrap("points", alpha = 0.3))) 
+
+   
+```
+
+
+A correlação entre o número de ocorrências retornadas e a duração da seção é despresível, logo os resultados evidenciam que se uma busca retorna mais resultados que outra, isso não significa que a sessão durará mais tempo e o usuário passará mais tempo navegando.
+
+```{r}
+buscas = buscas %>%
+    mutate(duration = as.numeric(difftime(session_last_date, session_start_date, units = "mins"))) 
+   
+   buscas%>% 
+  select(DURATION=duration, CLICKS=num_clicks) %>% 
+  ggpairs(mapping=ggplot2::aes(colour = "blue"),  upper = list(continuous = wrap('cor', method = "spearman")), lower = list(continuous = wrap("points", alpha = 0.3))) 
+
+   
+```
+
+Abaixo são observadas as correlações entre as variáveis supracitadas para diferentes coeficientes de correlação. Observa-se que para todos os casos a maior correlação observada foi quando utilizado o coeficiente de Spearman, por este motivo a utilizamos no gráfico que foi exibido acima.
+
+```{r}
+      buscas %>%
+summarise(Correlation_Pearson=cor(num_clicks, duration),
+Correlation_Spearman=cor(num_clicks, duration, method = "spearman"),
+Correlation_Kendall=cor(num_clicks, duration, method = "kendall"))
+
+```
+
+```{r}
+   buscas %>%
+summarise(Correlation_Pearson=cor(results, duration),
+Correlation_Spearman=cor(results, duration, method = "spearman"),
+Correlation_Kendall=cor(results, duration, method = "kendall"))
+```
+
+
+
+
+#**CONCLUSÃO**
+
+A partir da análise dos dados realizadas, os resultados obtidos evidenciam que:
+
+
+A taxa de cliques apresenta pouca variação em função dos dias, e é maior para o grupo A do que para o grupo B;
+
+Os usuários tendem a clicar no primeiro resultado retornado. No entento, existem alguns valores discrepantes e atípicos como usuários que clicaram primeiro no 4103º resultado exibido (é necessário a obtenção de mais informações para ser possível explicar a presença desse outlier e considerar ou não a sua remoção);
+
+A taxa de resultados zero foi baixa e semelhante para o grupo A e B (um pouco superior para o grupo B em termos de mediana);
+
+Sessões de maiores duração tendem a apresentar um maior número de cliques. Em contrapartida o tamanho da sessão não possui forte relação com o número de resultados retornados em uma busca.
+
 

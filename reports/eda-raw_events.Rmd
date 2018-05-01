@@ -34,9 +34,49 @@ events = events %>%
 ```{r}
 events %>% 
     mutate(date = round_date(date, unit = "day")) %>% 
-    count(date, group) %>% 
-    ggplot(aes(x = date, y = n, fill = group)) + 
-    geom_area()
+   # count(date, group) %>% 
+    ggplot(events, mapping = aes(x = reorder(date,result_position), y = result_position))   +
+  geom_boxplot() 
+   
+```
+
+```{r}
+events %>% 
+    ggplot(aes(x = result_position)) + 
+    geom_histogram(bins = 20, fill = "white", color = "blue")  + geom_rug(alpha = .3) +  scale_x_log10() 
+```
+
+
+```{r}
+events %>% 
+ summarise( Media = mean(result_position, na.rm = TRUE),
+ Mediana = median(n_results, na.rm = TRUE),
+ Desvio = sd(n_results, na.rm = TRUE),  IQR = IQR(n_results, na.rm = TRUE),) 
+
+```
+
+
+```{r}
+
+#events %>% count(n_results==0)
+
+eventsa = events %>% 
+    filter(group == "a")
+
+eventsb = events %>% 
+    filter(group == "b")
+
+events3 = events %>% 
+    filter(n_results == "0")
+
+length(which(events$n_results==0))
+length(which(eventsa$n_results==0))
+length(which(eventsb$n_results==0))
+
+ggplot(events3) + 
+  geom_bar(mapping = aes(x = group), stat = "count")   
+
+
 ```
 
 ## Por tipo

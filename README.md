@@ -1,3 +1,6 @@
+
+Relatório Final: http://rpubs.com/marcelatassyany/lab2-cp4
+
 # Seções, buscas e navegação na wikimedia
 
 Este repo é a semente para uma análise de padrões de busca e navegação em páginas de projetos da wikimedia (provavelmente wikipedia).
